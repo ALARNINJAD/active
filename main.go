@@ -116,16 +116,23 @@ func main() {
 		return
 	}
 
-	run("git", "add", "--all")
-	run("git", "commit", "-m", "'update sub'")
-	run("git", "push")
+	AddCommitPush()
 
 	fmt.Println("done ✅")
 }
 
-func run(cmd string, args ...string) {
-	c := exec.Command(cmd, args...)
-	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
-	_ = c.Run()
+func AddCommitPush() error {
+	commands := [][]string{
+		{"git", "add", "--all"},
+		{"git", "commit", "-m", "update"},
+		{"git", "push"},
+	}
+
+	for _, args := range commands {
+		cmd := exec.Command(args[0], args[1:]...)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("command failed (%v): %w", args, err)
+		}
+	}
+	return nil
 }
