@@ -74,7 +74,7 @@ func main() {
 
 	fmt.Println("Done. Configs updated successfully.")
 
-	if err := AddCommitPush("update", "origin", "main"); err != nil {
+	if err := AddCommitPush(); err != nil {
 		panic(err)
 	}
 
@@ -125,11 +125,11 @@ func writeConfigsToFile(path string, configs []string) {
 	writer.Flush()
 }
 
-func AddCommitPush(commitMessage, remote, branch string) error {
+func AddCommitPush() error {
 	commands := [][]string{
-		{"git", "add", "."},
-		{"git", "commit", "-m", commitMessage},
-		{"git", "push", remote, branch},
+		{"git", "add", "--all"},
+		{"git", "commit", "-m", "update"},
+		{"git", "push"},
 	}
 
 	for _, args := range commands {
