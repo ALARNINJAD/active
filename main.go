@@ -2,141 +2,130 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
 const (
-	configFile = "sub.txt"
+	subFile    = "sub.txt"
 	maxConfigs = 50
+	commitMsg  = "update v2ray subscription"
 )
+
+func normalizeConfig(cfg string) string {
+	if i := strings.Index(cfg, "#"); i != -1 {
+		return cfg[:i]
+	}
+	return cfg
+}
+
+func extractName(cfg string) string {
+	if i := strings.Index(cfg, "#"); i != -1 {
+		return cfg[i+1:]
+	}
+	return ""
+}
+
+func replaceName(cfg, newName string) string {
+	base := normalizeConfig(cfg)
+	return base + "#" + newName
+}
+
+func maxIndexForPrefix(configs []string, prefix string) int {
+	re := regexp.MustCompile("^" + regexp.QuoteMeta(prefix) + "-(\\d+)$")
+	max := 0
+	for _, c := range configs {
+		name := extractName(c)
+		if m := re.FindStringSubmatch(name); len(m) == 2 {
+			var n int
+			fmt.Sscanf(m[1], "%d", &n)
+			if n > max {
+				max = n
+			}
+		}
+	}
+	return max
+}
 
 func main() {
 	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Println("Paste v2ray configs (end with empty line):")
-	var inputConfigs []string
-	for {
-		line, _ := reader.ReadString('\n')
-		line = strings.TrimSpace(line)
-		if line == "" {
-			break
-		}
-		inputConfigs = append(inputConfigs, line)
-	}
-
-	if len(inputConfigs) == 0 {
-		fmt.Println("No configs provided.")
-		return
-	}
-
-	fmt.Print("Enter visual name: ")
+	fmt.Print("base name: ")
 	baseName, _ := reader.ReadString('\n')
 	baseName = strings.TrimSpace(baseName)
-	if baseName == "" {
-		fmt.Println("Invalid name.")
-		return
-	}
 
-	existingConfigs := readConfigsFromFile(configFile)
+	fmt.Println("paste configs (end with CTRL+D):")
 
-	existingMap := make(map[string]string)
-	for _, c := range existingConfigs {
-		key := normalizeConfig(c)
-		existingMap[key] = c
-	}
-
-	var newConfigs []string
-	for i, c := range inputConfigs {
-		key := normalizeConfig(c)
-
-		delete(existingMap, key)
-
-		newName := fmt.Sprintf("%s-%d", baseName, i+1)
-		newConfigs = append(newConfigs, setVisualName(c, newName))
-	}
-
-	var finalConfigs []string
-
-	finalConfigs = append(finalConfigs, newConfigs...)
-
-	for _, c := range existingMap {
-		finalConfigs = append(finalConfigs, c)
-	}
-
-	if len(finalConfigs) > maxConfigs {
-		finalConfigs = finalConfigs[:maxConfigs]
-	}
-
-	writeConfigsToFile(configFile, finalConfigs)
-
-	fmt.Println("Done. Configs updated successfully.")
-
-	if err := AddCommitPush(); err != nil {
-		panic(err)
-	}
-
-}
-
-func normalizeConfig(c string) string {
-	if idx := strings.Index(c, "#"); idx != -1 {
-		return c[:idx]
-	}
-	return c
-}
-
-func setVisualName(c, name string) string {
-	base := normalizeConfig(c)
-	return base + "#" + name
-}
-
-func readConfigsFromFile(path string) []string {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer file.Close()
-
-	var configs []string
-	scanner := bufio.NewScanner(file)
+	var inputConfigs []string
+	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
-			configs = append(configs, line)
+			inputConfigs = append(inputConfigs, line)
 		}
 	}
-	return configs
-}
 
-func writeConfigsToFile(path string, configs []string) {
-	file, err := os.Create(path)
-	if err != nil {
-		fmt.Println("Error writing file:", err)
+	var existing []string
+	if data, err := os.ReadFile(subFile); err == nil {
+		for _, l := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(l) != "" {
+				existing = append(existing, strings.TrimSpace(l))
+			}
+		}
+	}
+
+	existingMap := make(map[string]string)
+	for _, c := range existing {
+		existingMap[normalizeConfig(c)] = c
+	}
+
+	startIndex := maxIndexForPrefix(existing, baseName) + 1
+
+	var newConfigs []string
+	for i, c := range inputConfigs {
+		norm := normalizeConfig(c)
+
+		delete(existingMap, norm)
+
+		newName := fmt.Sprintf("%s-%d", baseName, startIndex+i)
+		newConfigs = append(newConfigs, replaceName(c, newName))
+	}
+
+	var final []string
+	final = append(final, newConfigs...)
+
+	for _, c := range existingMap {
+		final = append(final, c)
+	}
+
+	if len(final) > maxConfigs {
+		final = final[:maxConfigs]
+	}
+
+	var buf bytes.Buffer
+	for _, c := range final {
+		buf.WriteString(c + "\n")
+	}
+
+	if err := os.WriteFile(subFile, buf.Bytes(), 0644); err != nil {
+		fmt.Println("write error:", err)
 		return
 	}
-	defer file.Close()
 
-	writer := bufio.NewWriter(file)
-	for _, c := range configs {
-		writer.WriteString(c + "\n")
-	}
-	writer.Flush()
+	run("git", "add", "--all")
+	run("git", "commit", "-m", "'update sub'")
+	run("git", "push")
+
+	fmt.Println("done ✅")
 }
 
-func AddCommitPush() error {
-	commands := [][]string{
-		{"git", "add", "--all"},
-		{"git", "commit", "-m", "'update'"},
-		{"git", "push"},
-	}
-
-	for _, args := range commands {
-		cmd := exec.Command(args[0], args[1:]...)
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("command failed (%v): %w", args, err)
-		}
-	}
-	return nil
+func run(cmd string, args ...string) {
+	c := exec.Command(cmd, args...)
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	_ = c.Run()
 }
