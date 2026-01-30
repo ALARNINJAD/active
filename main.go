@@ -12,7 +12,7 @@ import (
 
 const (
 	subFile    = "sub.txt"
-	maxConfigs = 50
+	maxConfigs = 100
 	commitMsg  = "update v2ray subscription"
 )
 
